@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "node:fs";
 import path from "node:path";
-import { getEnvConfig } from "../config/env";
+import { getDatabaseUrl } from "../config/env";
 
 function runFailsafeBackup() {
   if (process.env.NODE_ENV !== "development") return;
@@ -58,17 +58,25 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-export const prisma =
-  globalForPrisma.prisma ??
-  (() => {
-    // Validate server environment variables
-    getEnvConfig();
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    // Validate DATABASE_URL lazily when Prisma Client is first accessed at runtime
+    getDatabaseUrl();
     runFailsafeBackup();
-    return new PrismaClient({
+    globalForPrisma.prisma = new PrismaClient({
       log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["error"],
     });
-  })();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  }
+  return globalForPrisma.prisma;
 }
+
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    const instance = getPrismaClient();
+    const value = Reflect.get(instance, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  },
+});

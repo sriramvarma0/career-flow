@@ -67,6 +67,38 @@ async function testStorage() {
   }
   console.log("-> CloudStorageProvider validation test PASSED\n");
 
+  // 5. Optional Real Cloudflare R2 Integration Test
+  if (process.env.R2_INTEGRATION_TEST === "true") {
+    console.log("[Test 5] Running Real Cloudflare R2 Integration Test (R2_INTEGRATION_TEST=true)...");
+    const cloudProvider = new CloudStorageProvider();
+    const timestamp = Date.now();
+    const r2TestKey = `users/test_integration/r2_test_${timestamp}.txt`;
+    const r2TestContent = `Cloudflare R2 Integration Test Payload - ${timestamp}`;
+
+    console.log(`[Test 5] Uploading to R2: key='${r2TestKey}'`);
+    await cloudProvider.upload(r2TestKey, Buffer.from(r2TestContent), "text/plain");
+
+    const r2Exists = await cloudProvider.exists(r2TestKey);
+    console.log(`[Test 5] R2 Exists check: ${r2Exists}`);
+    if (!r2Exists) throw new Error("R2 object should exist after upload");
+
+    const r2Downloaded = await cloudProvider.download(r2TestKey);
+    const r2Text = r2Downloaded.stream.toString("utf-8");
+    console.log(`[Test 5] R2 Downloaded content: '${r2Text}'`);
+    if (r2Text !== r2TestContent) throw new Error("R2 Downloaded content mismatch");
+
+    console.log(`[Test 5] Deleting test object from R2...`);
+    await cloudProvider.delete(r2TestKey);
+
+    const r2ExistsAfterDelete = await cloudProvider.exists(r2TestKey);
+    console.log(`[Test 5] R2 Exists check after delete: ${r2ExistsAfterDelete}`);
+    if (r2ExistsAfterDelete) throw new Error("R2 object should not exist after deletion");
+
+    console.log("-> Real Cloudflare R2 Integration Test PASSED\n");
+  } else {
+    console.log("[Test 5] Real Cloudflare R2 Integration Test skipped (Set R2_INTEGRATION_TEST=true with credentials to run).\n");
+  }
+
   console.log("=== All Storage Provider Tests PASSED Successfully ===");
 }
 

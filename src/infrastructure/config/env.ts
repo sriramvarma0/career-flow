@@ -1,5 +1,4 @@
 export interface AppEnvConfig {
-  databaseUrl: string;
   storageProvider: "local" | "cloud";
   s3?: {
     endpoint: string;
@@ -10,18 +9,21 @@ export interface AppEnvConfig {
   };
 }
 
-let cachedConfig: AppEnvConfig | null = null;
+let cachedStorageConfig: AppEnvConfig | null = null;
 
-export function getEnvConfig(): AppEnvConfig {
-  if (cachedConfig) {
-    return cachedConfig;
-  }
-
+export function getDatabaseUrl(): string {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error(
       "Configuration Error: DATABASE_URL environment variable is missing. Check your .env file or environment settings."
     );
+  }
+  return databaseUrl;
+}
+
+export function getEnvConfig(): AppEnvConfig {
+  if (cachedStorageConfig) {
+    return cachedStorageConfig;
   }
 
   const rawStorageProvider = (process.env.STORAGE_PROVIDER || "local").toLowerCase().trim();
@@ -58,8 +60,7 @@ export function getEnvConfig(): AppEnvConfig {
       );
     }
 
-    cachedConfig = {
-      databaseUrl,
+    cachedStorageConfig = {
       storageProvider: "cloud",
       s3: {
         endpoint: endpoint!,
@@ -70,11 +71,10 @@ export function getEnvConfig(): AppEnvConfig {
       },
     };
   } else {
-    cachedConfig = {
-      databaseUrl,
+    cachedStorageConfig = {
       storageProvider: "local",
     };
   }
 
-  return cachedConfig;
+  return cachedStorageConfig;
 }
