@@ -1,0 +1,1 @@
+export { StatsCard as StatCard } from "@/components/stats-card";
