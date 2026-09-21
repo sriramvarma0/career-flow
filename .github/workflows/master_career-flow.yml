@@ -41,18 +41,13 @@ jobs:
 
       - name: Log in to Docker Registry (Custom Registry)
         if: env.REGISTRY != ''
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | tr -d '\r\n' | docker login "${{ env.REGISTRY }}" -u "$(echo "${{ env.REGISTRY_USERNAME }}" | tr -d '[:space:]')" --password-stdin
 
       - name: Log in to Docker Hub
         if: env.REGISTRY == ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | tr -d '\r\n' | docker login -u "$(echo "${{ env.REGISTRY_USERNAME }}" | tr -d '[:space:]')" --password-stdin
 
       - name: Extract Docker metadata (tags, labels)
         id: meta
