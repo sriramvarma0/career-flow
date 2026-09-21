@@ -2,7 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getServerSession } from "next-auth";
 import { comparePassword } from "@/lib/password";
-import { prisma } from "@/infrastructure/database/prisma";
+import { getUserByNormalizedContact } from "@/repositories/user-repository";
 import { loginSchema } from "@/lib/validators";
 import { normalizeContactValue } from "@/lib/utils";
 
@@ -32,18 +32,7 @@ export const authOptions: NextAuthOptions = {
           ? normalizeContactValue(identifier, "EMAIL")
           : normalizeContactValue(identifier, "PHONE");
 
-        const contact = await prisma.userContact.findUnique({
-          where: {
-            normalizedValue: normalizedIdentifier,
-          },
-          include: {
-            user: {
-              include: {
-                contacts: true,
-              },
-            },
-          },
-        });
+        const contact = await getUserByNormalizedContact(normalizedIdentifier);
 
         if (!contact) {
           return null;

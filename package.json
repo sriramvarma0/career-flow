@@ -9,6 +9,8 @@
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:d1": "tsx scripts/database/migrate-sqlite-to-d1.ts",
+    "storage:migrate:r2": "tsx scripts/storage/migrate-local-to-r2.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:restore": "node scripts/database/restore-backup.js",
     "postinstall": "prisma generate"

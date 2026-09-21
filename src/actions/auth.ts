@@ -3,12 +3,21 @@
 import { randomBytes, createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { prisma } from "@/infrastructure/database/prisma";
 import { hashPassword } from "@/lib/password";
 import { normalizeContactValue } from "@/lib/utils";
 import { registerSchema, forgotPasswordSchema, resetPasswordSchema, profileSchema, contactUpdateSchema } from "@/lib/validators";
 import { auth } from "@/lib/auth";
 import { type ActionResult } from "@/types/jobvault";
+import {
+  findExistingContactForRegistration,
+  createUserWithContacts,
+  getUserByNormalizedContact,
+  createPasswordResetToken,
+  consumePasswordResetToken,
+  updateUserProfile,
+  findExistingContact,
+  upsertUserContact,
+} from "@/repositories/user-repository";
 
 function serializeError(error: unknown): ActionResult {
   if (error instanceof Error) {
@@ -39,11 +48,7 @@ export async function registerUser(formData: FormData): Promise<ActionResult> {
   const normalizedEmail = normalizeContactValue(payload.primaryEmail, "EMAIL");
   const normalizedPhone = normalizeContactValue(payload.primaryPhone, "PHONE");
 
-  const existingContact = await prisma.userContact.findFirst({
-    where: {
-      OR: [{ normalizedValue: normalizedEmail }, { normalizedValue: normalizedPhone }],
-    },
-  });
+  const existingContact = await findExistingContactForRegistration(normalizedEmail, normalizedPhone);
 
   if (existingContact) {
     return {
@@ -53,32 +58,15 @@ export async function registerUser(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    const user = await prisma.user.create({
-      data: {
-        fullName: payload.fullName,
-        passwordHash: await hashPassword(payload.password),
-        contacts: {
-          create: [
-            {
-              type: "EMAIL",
-              value: payload.primaryEmail,
-              normalizedValue: normalizedEmail,
-              isPrimary: true,
-              isVerified: false,
-            },
-            {
-              type: "PHONE",
-              value: payload.primaryPhone,
-              normalizedValue: normalizedPhone,
-              isPrimary: true,
-              isVerified: false,
-            },
-          ],
-        },
-      },
+    await createUserWithContacts({
+      fullName: payload.fullName,
+      passwordHash: await hashPassword(payload.password),
+      primaryEmail: payload.primaryEmail,
+      normalizedEmail,
+      primaryPhone: payload.primaryPhone,
+      normalizedPhone,
     });
 
-    await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
     revalidatePath("/login");
     return { ok: true, message: "Account created. Please sign in." };
   } catch (error) {
@@ -98,10 +86,7 @@ export async function requestPasswordReset(formData: FormData): Promise<ActionRe
     ? normalizeContactValue(identifier, "EMAIL")
     : normalizeContactValue(identifier, "PHONE");
 
-  const contact = await prisma.userContact.findUnique({
-    where: { normalizedValue: normalizedIdentifier },
-    include: { user: true },
-  });
+  const contact = await getUserByNormalizedContact(normalizedIdentifier);
 
   if (!contact) {
     return { ok: true, message: "If the account exists, a reset token has been generated.", data: { token: "" } };
@@ -110,12 +95,10 @@ export async function requestPasswordReset(formData: FormData): Promise<ActionRe
   const token = randomBytes(24).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
 
-  await prisma.passwordResetToken.create({
-    data: {
-      userId: contact.user.id,
-      tokenHash,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 30),
-    },
+  await createPasswordResetToken({
+    userId: contact.user.id,
+    tokenHash,
+    expiresAt: new Date(Date.now() + 1000 * 60 * 30),
   });
 
   return {
@@ -137,16 +120,13 @@ export async function resetPassword(formData: FormData): Promise<ActionResult> {
   }
 
   const tokenHash = createHash("sha256").update(parsed.data.token).digest("hex");
-  const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash }, include: { user: true } });
+  const newPasswordHash = await hashPassword(parsed.data.password);
 
-  if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
+  const success = await consumePasswordResetToken(tokenHash, newPasswordHash);
+
+  if (!success) {
     return { ok: false, message: "That reset token is invalid or has expired." };
   }
-
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: resetToken.userId }, data: { passwordHash: await hashPassword(parsed.data.password) } }),
-    prisma.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } }),
-  ]);
 
   revalidatePath("/login");
   return { ok: true, message: "Password updated successfully." };
@@ -163,10 +143,7 @@ export async function updateProfile(formData: FormData): Promise<ActionResult> {
     return { ok: false, message: "Please provide a valid full name.", fieldErrors: parsed.error.flatten().fieldErrors };
   }
 
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { fullName: parsed.data.fullName },
-  });
+  await updateUserProfile(session.user.id, parsed.data.fullName);
 
   revalidatePath("/profile");
   return { ok: true, message: "Profile updated." };
@@ -191,42 +168,22 @@ export async function updateContact(formData: FormData): Promise<ActionResult> {
   }
 
   const normalizedValue = normalizeContactValue(parsed.data.value, parsed.data.type);
-
-  const existing = await prisma.userContact.findFirst({
-    where: {
-      normalizedValue,
-      NOT: { id: parsed.data.id ?? undefined },
-    },
-  });
+  const existing = await findExistingContact(normalizedValue, parsed.data.id);
 
   if (existing) {
     return { ok: false, message: "That email or phone number already exists." };
   }
 
-  if (parsed.data.id) {
-    await prisma.userContact.update({
-      where: { id: parsed.data.id },
-      data: {
-        type: parsed.data.type,
-        value: parsed.data.value,
-        normalizedValue,
-        isPrimary: parsed.data.isPrimary,
-        isVerified: parsed.data.isVerified,
-      },
-    });
-  } else {
-    await prisma.userContact.create({
-      data: {
-        userId: session.user.id,
-        type: parsed.data.type,
-        value: parsed.data.value,
-        normalizedValue,
-        isPrimary: parsed.data.isPrimary,
-        isVerified: parsed.data.isVerified,
-      },
-    });
-  }
+  await upsertUserContact({
+    id: parsed.data.id,
+    userId: session.user.id,
+    type: parsed.data.type,
+    value: parsed.data.value,
+    normalizedValue,
+    isPrimary: parsed.data.isPrimary,
+    isVerified: parsed.data.isVerified,
+  });
 
   revalidatePath("/profile");
   return { ok: true, message: "Contact updated." };
-}
+}

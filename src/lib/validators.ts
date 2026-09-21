@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { applicationSourceValues, applicationStatuses, contactTypes } from "@/types/jobvault";
+import { applicationSourceValues, contactTypes } from "@/types/jobvault";
 
 export const registerSchema = z
   .object({

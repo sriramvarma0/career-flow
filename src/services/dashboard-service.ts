@@ -1,18 +1,11 @@
-import { prisma } from "@/infrastructure/database/prisma";
 import { applicationStatuses, type DashboardMetrics } from "@/types/jobvault";
+import { getApplicationStats } from "@/repositories/application-repository";
+import { getCustomStatuses } from "@/repositories/custom-status-repository";
 
 export async function getDashboardMetrics(userId: string): Promise<DashboardMetrics> {
   const [applications, customStatuses] = await Promise.all([
-    prisma.application.findMany({
-      where: { userId },
-      select: { status: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.customStatus.findMany({
-      where: { userId },
-      select: { name: true, linkedStatus: true },
-      orderBy: { createdAt: "asc" },
-    }),
+    getApplicationStats(userId),
+    getCustomStatuses(userId),
   ]);
 
   // Map of status names to their primary categories

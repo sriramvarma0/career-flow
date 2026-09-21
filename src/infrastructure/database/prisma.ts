@@ -4,7 +4,7 @@ import path from "node:path";
 import { getDatabaseUrl } from "../config/env";
 
 function runFailsafeBackup() {
-  if (process.env.NODE_ENV !== "development") return;
+  if (process.env.NODE_ENV !== "development" || process.env.DATABASE_PROVIDER === "d1") return;
 
   try {
     const dbPath = path.join(process.cwd(), "data", "database", "dev.db");

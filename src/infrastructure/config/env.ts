@@ -1,5 +1,11 @@
 export interface AppEnvConfig {
+  databaseProvider: "sqlite" | "d1";
   storageProvider: "local" | "cloud";
+  d1?: {
+    accountId: string;
+    databaseId: string;
+    apiToken: string;
+  };
   s3?: {
     endpoint: string;
     region: string;
@@ -9,9 +15,25 @@ export interface AppEnvConfig {
   };
 }
 
-let cachedStorageConfig: AppEnvConfig | null = null;
+let cachedAppConfig: AppEnvConfig | null = null;
+
+export function getDatabaseProvider(): "sqlite" | "d1" {
+  const provider = (process.env.DATABASE_PROVIDER || "sqlite").toLowerCase().trim();
+  if (provider !== "sqlite" && provider !== "d1") {
+    throw new Error(
+      `Configuration Error: Invalid DATABASE_PROVIDER '${provider}'. Must be 'sqlite' or 'd1'.`
+    );
+  }
+  return provider;
+}
 
 export function getDatabaseUrl(): string {
+  const provider = getDatabaseProvider();
+  if (provider === "d1") {
+    throw new Error(
+      "Configuration Error: DATABASE_URL was requested, but DATABASE_PROVIDER is set to 'd1'. Local SQLite file is not required or used for D1."
+    );
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error(
@@ -21,9 +43,44 @@ export function getDatabaseUrl(): string {
   return databaseUrl;
 }
 
+export function getD1Config(): { accountId: string; databaseId: string; apiToken: string } {
+  const provider = getDatabaseProvider();
+  if (provider !== "d1") {
+    throw new Error(
+      "Configuration Error: D1 configuration requested while DATABASE_PROVIDER is not set to 'd1'."
+    );
+  }
+
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  const missingVars: string[] = [];
+  if (!accountId) missingVars.push("CLOUDFLARE_ACCOUNT_ID");
+  if (!databaseId) missingVars.push("CLOUDFLARE_DATABASE_ID");
+  if (!apiToken) missingVars.push("CLOUDFLARE_API_TOKEN");
+
+  if (missingVars.length > 0) {
+    throw new Error(
+      `Configuration Error: DATABASE_PROVIDER is set to 'd1', but the following required Cloudflare D1 environment variables are missing: ${missingVars.join(
+        ", "
+      )}.`
+    );
+  }
+
+  return { accountId: accountId!, databaseId: databaseId!, apiToken: apiToken! };
+}
+
 export function getEnvConfig(): AppEnvConfig {
-  if (cachedStorageConfig) {
-    return cachedStorageConfig;
+  if (cachedAppConfig) {
+    return cachedAppConfig;
+  }
+
+  const databaseProvider = getDatabaseProvider();
+  let d1Config: { accountId: string; databaseId: string; apiToken: string } | undefined;
+
+  if (databaseProvider === "d1") {
+    d1Config = getD1Config();
   }
 
   const rawStorageProvider = (process.env.STORAGE_PROVIDER || "local").toLowerCase().trim();
@@ -60,8 +117,10 @@ export function getEnvConfig(): AppEnvConfig {
       );
     }
 
-    cachedStorageConfig = {
+    cachedAppConfig = {
+      databaseProvider,
       storageProvider: "cloud",
+      d1: d1Config,
       s3: {
         endpoint: endpoint!,
         region,
@@ -71,10 +130,13 @@ export function getEnvConfig(): AppEnvConfig {
       },
     };
   } else {
-    cachedStorageConfig = {
+    cachedAppConfig = {
+      databaseProvider,
       storageProvider: "local",
+      d1: d1Config,
     };
   }
 
-  return cachedStorageConfig;
+  return cachedAppConfig;
 }
+

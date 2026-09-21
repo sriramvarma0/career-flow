@@ -1,14 +1,30 @@
 "use server";
 
-import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { prisma } from "@/infrastructure/database/prisma";
 import { auth } from "@/lib/auth";
 import { getStorageProvider, getStorageKey } from "@/infrastructure/storage";
 import { applicationSchema, noteSchema, uploadSchema } from "@/lib/validators";
 import { type ActionResult } from "@/types/jobvault";
-import { getApplicationById } from "@/repositories/application-repository";
+import {
+  createApplication,
+  deleteApplication,
+  getApplicationById,
+  updateApplicationWithTimeline,
+  updateStatusHistoryTimeline,
+} from "@/repositories/application-repository";
+import {
+  addApplicationNote,
+  createDocument,
+  deleteDocument,
+  getDocumentById,
+  getDocumentsForApplication,
+  getUsedTags,
+} from "@/repositories/document-repository";
+import {
+  createCustomStatus,
+  getCustomStatuses,
+} from "@/repositories/custom-status-repository";
 
 function getSessionUserId(session: Awaited<ReturnType<typeof auth>>) {
   const userId = session?.user?.id;
@@ -45,7 +61,7 @@ export async function createApplicationAction(formData: FormData): Promise<Actio
   const appliedDateVal = parsed.data.appliedDate ? new Date(parsed.data.appliedDate) : null;
   const initialStatus = parsed.data.status;
   
-  const historyData: Prisma.StatusHistoryCreateWithoutApplicationInput[] = [];
+  const historyData: { previousStatus?: string | null; newStatus: string; changedAt: Date }[] = [];
 
   // We ALWAYS create an "Applied" stage by default
   historyData.push({
@@ -63,26 +79,22 @@ export async function createApplicationAction(formData: FormData): Promise<Actio
     });
   }
 
-  const application = await prisma.application.create({
-    data: {
-      userId,
-      companyName: parsed.data.companyName,
-      jobTitle: parsed.data.jobTitle,
-      applicationReferenceId: parsed.data.applicationReferenceId || null,
-      source: parsed.data.source,
-      status: parsed.data.status,
-      appliedDate: appliedDateVal,
-      jobUrl: parsed.data.jobUrl || null,
-      location: parsed.data.location || null,
-      salary: parsed.data.salary || null,
-      experience: parsed.data.experience || null,
-      appliedPlatform: parsed.data.appliedPlatform || null,
-      jobId: parsed.data.jobId || null,
-      notes: parsed.data.notes || null,
-      statusHistory: {
-        create: historyData,
-      },
-    },
+  const application = await createApplication({
+    userId,
+    companyName: parsed.data.companyName,
+    jobTitle: parsed.data.jobTitle,
+    applicationReferenceId: parsed.data.applicationReferenceId || null,
+    source: parsed.data.source,
+    status: parsed.data.status,
+    appliedDate: appliedDateVal,
+    jobUrl: parsed.data.jobUrl || null,
+    location: parsed.data.location || null,
+    salary: parsed.data.salary || null,
+    experience: parsed.data.experience || null,
+    appliedPlatform: parsed.data.appliedPlatform || null,
+    jobId: parsed.data.jobId || null,
+    notes: parsed.data.notes || null,
+    historyData,
   });
 
   revalidatePath("/applications");
@@ -121,77 +133,28 @@ export async function updateApplicationAction(formData: FormData): Promise<Actio
     return { ok: false, message: "Please review the application fields.", fieldErrors: parsed.error.flatten().fieldErrors };
   }
 
-  const statusChanged = existing.status !== parsed.data.status;
-
-  if (statusChanged) {
-    const defaultStatuses = ["Applied", "Assessment", "Interview", "HRRound", "Offer", "Rejected", "Withdrawn"];
-    if (defaultStatuses.includes(parsed.data.status)) {
-      const alreadyExists = await prisma.statusHistory.findFirst({
-        where: { applicationId, newStatus: parsed.data.status },
-      });
-      if (alreadyExists) {
-        return {
-          ok: false,
-          message: `Primary status '${parsed.data.status === "HRRound" ? "HR Round" : parsed.data.status}' already exists in this application's timeline and cannot be repeated.`,
-        };
-      }
-    }
-  }
-
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.application.update({
-      where: { id: applicationId },
-      data: {
-        companyName: parsed.data.companyName,
-        jobTitle: parsed.data.jobTitle,
-        applicationReferenceId: parsed.data.applicationReferenceId || null,
-        source: parsed.data.source,
-        status: parsed.data.status,
-        appliedDate: parsed.data.appliedDate ? new Date(parsed.data.appliedDate) : null,
-        jobUrl: parsed.data.jobUrl || null,
-        location: parsed.data.location || null,
-        salary: parsed.data.salary || null,
-        experience: parsed.data.experience || null,
-        appliedPlatform: parsed.data.appliedPlatform || null,
-        jobId: parsed.data.jobId || null,
-        notes: parsed.data.notes || null,
-      },
+  try {
+    await updateApplicationWithTimeline({
+      applicationId,
+      existingStatus: existing.status,
+      companyName: parsed.data.companyName,
+      jobTitle: parsed.data.jobTitle,
+      applicationReferenceId: parsed.data.applicationReferenceId || null,
+      source: parsed.data.source,
+      status: parsed.data.status,
+      appliedDate: parsed.data.appliedDate ? new Date(parsed.data.appliedDate) : null,
+      jobUrl: parsed.data.jobUrl || null,
+      location: parsed.data.location || null,
+      salary: parsed.data.salary || null,
+      experience: parsed.data.experience || null,
+      appliedPlatform: parsed.data.appliedPlatform || null,
+      jobId: parsed.data.jobId || null,
+      notes: parsed.data.notes || null,
     });
-
-    if (statusChanged) {
-      await tx.statusHistory.create({
-        data: {
-          applicationId,
-          previousStatus: existing.status,
-          newStatus: parsed.data.status,
-          changedAt: new Date(),
-        },
-      });
-    }
-
-    // Sync the "Applied" status history stage with the new appliedDate
-    const newAppliedDate = parsed.data.appliedDate ? new Date(parsed.data.appliedDate) : null;
-    if (newAppliedDate) {
-      const appliedStage = await tx.statusHistory.findFirst({
-        where: { applicationId, newStatus: "Applied" },
-      });
-      if (appliedStage) {
-        await tx.statusHistory.update({
-          where: { id: appliedStage.id },
-          data: { changedAt: newAppliedDate },
-        });
-      } else {
-        await tx.statusHistory.create({
-          data: {
-            applicationId,
-            previousStatus: null,
-            newStatus: "Applied",
-            changedAt: newAppliedDate,
-          },
-        });
-      }
-    }
-  });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to update application.";
+    return { ok: false, message: msg };
+  }
 
   revalidatePath(`/applications/${applicationId}`);
   revalidatePath("/applications");
@@ -209,7 +172,7 @@ export async function deleteApplicationAction(formData: FormData): Promise<Actio
     return { ok: false, message: "Application not found." };
   }
 
-  const documents = await prisma.document.findMany({ where: { applicationId, application: { userId } } });
+  const documents = await getDocumentsForApplication(userId, applicationId);
   const storage = getStorageProvider();
   for (const doc of documents) {
     await storage.delete(doc.storageKey);
@@ -218,7 +181,7 @@ export async function deleteApplicationAction(formData: FormData): Promise<Actio
     await storage.deletePrefix(`users/user_${userId}/application_${applicationId}`);
   }
 
-  await prisma.application.delete({ where: { id: applicationId } });
+  await deleteApplication(applicationId);
   revalidatePath("/applications");
   revalidatePath("/dashboard");
   redirect("/applications");
@@ -242,12 +205,7 @@ export async function addApplicationNoteAction(formData: FormData): Promise<Acti
     return { ok: false, message: "Application not found." };
   }
 
-  await prisma.applicationNote.create({
-    data: {
-      applicationId: parsed.data.applicationId,
-      content: parsed.data.content,
-    },
-  });
+  await addApplicationNote(parsed.data.applicationId, parsed.data.content);
 
   revalidatePath(`/applications/${parsed.data.applicationId}`);
   return { ok: true, message: "Note added." };
@@ -300,16 +258,14 @@ export async function uploadDocumentAction(formData: FormData): Promise<ActionRe
     const arrayBuffer = await file.arrayBuffer();
     await storage.upload(storageKey, Buffer.from(arrayBuffer), file.type);
 
-    await prisma.document.create({
-      data: {
-        applicationId: parsed.data.applicationId,
-        fileName: storedFileName,
-        originalFileName,
-        storageKey,
-        fileSize: file.size,
-        mimeType: file.type,
-        tags,
-      },
+    await createDocument({
+      applicationId: parsed.data.applicationId,
+      fileName: storedFileName,
+      originalFileName,
+      storageKey,
+      fileSize: file.size,
+      mimeType: file.type,
+      tags,
     });
   }
 
@@ -322,16 +278,14 @@ export async function deleteDocumentAction(formData: FormData): Promise<ActionRe
   const userId = getSessionUserId(session);
   const documentId = String(formData.get("documentId") ?? "");
 
-  const document = await prisma.document.findFirst({
-    where: { id: documentId, application: { userId } },
-  });
+  const document = await getDocumentById(userId, documentId);
 
   if (!document) {
     return { ok: false, message: "Document not found." };
   }
 
   const storage = getStorageProvider();
-  await prisma.document.delete({ where: { id: documentId } });
+  await deleteDocument(documentId);
   await storage.delete(document.storageKey);
   revalidatePath(`/applications/${document.applicationId}`);
   return { ok: true, message: "Document deleted." };
@@ -375,7 +329,6 @@ export async function updateStatusHistoryAction(
     };
   }
 
-
   const sortedStages = [...stages].sort((a, b) => {
     const getStageTime = (stage: { status: string; date: string }) => {
       if (stage.status === "Applied" && !stage.date) {
@@ -386,38 +339,12 @@ export async function updateStatusHistoryAction(
     return getStageTime(a) - getStageTime(b);
   });
 
-  // Delete all existing status history for this application
-  await prisma.statusHistory.deleteMany({
-    where: { applicationId },
-  });
-
-  // Create new status history records sequentially to ensure insertion order matches chronological date order
-  for (let i = 0; i < sortedStages.length; i++) {
-    const stage = sortedStages[i];
-    const parsedDate = stage.date === "" ? null : (stage.date && !isNaN(Date.parse(stage.date)) ? new Date(stage.date) : new Date());
-    await prisma.statusHistory.create({
-      data: {
-        applicationId,
-        previousStatus: i > 0 ? sortedStages[i - 1].status : null,
-        newStatus: stage.status,
-        changedAt: parsedDate,
-      },
-    });
-  }
-
-  const lastStage = sortedStages[sortedStages.length - 1];
   const appliedStage = sortedStages.find((s) => s.status === "Applied");
   const appliedDate = appliedStage && appliedStage.date && !isNaN(Date.parse(appliedStage.date))
     ? new Date(appliedStage.date)
     : null;
 
-  await prisma.application.update({
-    where: { id: applicationId },
-    data: {
-      ...(lastStage ? { status: lastStage.status } : {}),
-      appliedDate,
-    },
-  });
+  await updateStatusHistoryTimeline(applicationId, sortedStages, appliedDate);
 
   revalidatePath(`/applications/${applicationId}`);
   revalidatePath("/applications");
@@ -430,30 +357,8 @@ export async function getUsedTagsAction(): Promise<ActionResult<string[]>> {
   const userId = getSessionUserId(session);
 
   try {
-    const documents = await prisma.document.findMany({
-      where: {
-        application: {
-          userId,
-        },
-      },
-      select: {
-        tags: true,
-      },
-    });
-
-    const uniqueTags = new Set<string>();
-    documents.forEach((doc) => {
-      if (doc.tags) {
-        doc.tags.split(",").forEach((t) => {
-          const trimmed = t.trim();
-          if (trimmed) {
-            uniqueTags.add(trimmed);
-          }
-        });
-      }
-    });
-
-    return { ok: true, data: Array.from(uniqueTags) };
+    const tags = await getUsedTags(userId);
+    return { ok: true, data: tags };
   } catch (error) {
     return { ok: false, message: "Could not fetch tags." };
   }
@@ -464,11 +369,7 @@ export async function getCustomStatusesAction(): Promise<ActionResult<{ name: st
   const userId = getSessionUserId(session);
 
   try {
-    const customStatuses = await prisma.customStatus.findMany({
-      where: { userId },
-      orderBy: { createdAt: "asc" },
-      select: { name: true, linkedStatus: true },
-    });
+    const customStatuses = await getCustomStatuses(userId);
     return { ok: true, data: customStatuses };
   } catch (error) {
     return { ok: false, message: "Could not fetch custom statuses." };
@@ -505,29 +406,10 @@ export async function createCustomStatusAction(name: string, linkedStatus: strin
   }
 
   try {
-    const existing = await prisma.customStatus.findUnique({
-      where: {
-        userId_name: {
-          userId,
-          name: trimmed,
-        },
-      },
-    });
-
-    if (existing) {
-      return { ok: true, message: "Status already exists.", data: existing };
-    }
-
-    const created = await prisma.customStatus.create({
-      data: {
-        userId,
-        name: trimmed,
-        linkedStatus,
-      },
-    });
-
+    const created = await createCustomStatus(userId, trimmed, linkedStatus);
     return { ok: true, message: "Custom status added.", data: created };
   } catch (error) {
     return { ok: false, message: "Could not save custom status." };
   }
 }
+

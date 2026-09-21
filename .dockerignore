@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Next.js build output
+.next
+out
+build
+
+# Version control & CI/CD configuration
+.git
+.github
+.agents
+
+# Environment variables & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local SQLite database files, backups, and journaling
+data/database/*.db
+data/database/*.db-wal
+data/database/*.db-shm
+data/database/*.db-journal
+data/backups/*
+
+# Local runtime document storage
+storage/*
+!storage/.gitkeep
+
+# Logs & debug files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# IDE & TypeScript build artifacts
+.DS_Store
+.idea
+.vscode
+*.tsbuildinfo
+next-env.d.ts

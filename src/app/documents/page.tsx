@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/infrastructure/database/prisma";
+import { listDocumentsForUser } from "@/repositories/document-repository";
 import { AppShell } from "@/components/app-shell";
 import { DocumentsAccordion } from "@/components/documents-accordion";
 import { FileText, HardDrive, Tag } from "lucide-react";
@@ -14,15 +14,7 @@ export default async function DocumentsPage() {
     redirect("/login");
   }
 
-  const applications = await prisma.application.findMany({
-    where: { userId: session.user.id },
-    include: {
-      documents: {
-        orderBy: { uploadedAt: "desc" },
-      },
-    },
-    orderBy: { companyName: "asc" },
-  });
+  const applications = await listDocumentsForUser(session.user.id);
 
   // Calculate statistics for the dynamic banner
   const totalDocs = applications.reduce((sum, app) => sum + app.documents.length, 0);

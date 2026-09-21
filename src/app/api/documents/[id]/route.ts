@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/infrastructure/database/prisma";
+import { getDocumentById } from "@/repositories/document-repository";
 import { getStorageProvider } from "@/infrastructure/storage";
 
 function getMimeType(fileName: string): string {
@@ -37,14 +37,7 @@ export async function GET(
   const { id } = await params;
 
   // Find document and verify ownership
-  const document = await prisma.document.findFirst({
-    where: {
-      id,
-      application: {
-        userId: session.user.id,
-      },
-    },
-  });
+  const document = await getDocumentById(session.user.id, id);
 
   if (!document) {
     return new Response("Document not found", { status: 404 });

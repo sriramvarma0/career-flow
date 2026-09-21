@@ -27,7 +27,7 @@ export default async function EditApplicationPage({ params }: { params: Promise<
           companyName: application.companyName,
           jobTitle: application.jobTitle,
           applicationReferenceId: application.applicationReferenceId ?? "",
-          source: application.source,
+          source: application.source as any,
           status: application.status,
           appliedDate: application.appliedDate ? application.appliedDate.toISOString().slice(0, 10) : "",
           jobUrl: application.jobUrl ?? "",
