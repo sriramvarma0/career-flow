@@ -7,15 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  validate-and-push:
+  validate-build-and-push:
     name: Validate, Build, and Push Docker Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      REGISTRY: ${{ secrets.REGISTRY }}
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-      IMAGE_NAME: ${{ secrets.IMAGE_NAME || 'career-flow' }}
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -39,22 +36,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Registry (Custom Registry)
-        if: env.REGISTRY != ''
-        run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | tr -d '\r\n' | docker login "${{ env.REGISTRY }}" -u "$(echo "${{ env.REGISTRY_USERNAME }}" | tr -d '[:space:]')" --password-stdin
-
-      - name: Log in to Docker Hub
-        if: env.REGISTRY == ''
-        run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | tr -d '\r\n' | docker login -u "$(echo "${{ env.REGISTRY_USERNAME }}" | tr -d '[:space:]')" --password-stdin
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY || 'docker.io' }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Extract Docker metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY != '' && format('{0}/{1}', env.REGISTRY, env.IMAGE_NAME) || format('{0}/{1}', env.REGISTRY_USERNAME, env.IMAGE_NAME) }}
+            ${{ secrets.REGISTRY && format('{0}/{1}', secrets.REGISTRY, secrets.IMAGE_NAME || 'career-flow') || format('{0}/{1}', secrets.REGISTRY_USERNAME, secrets.IMAGE_NAME || 'career-flow') }}
           tags: |
             type=sha,format=long,prefix=
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
