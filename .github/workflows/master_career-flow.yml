@@ -46,7 +46,8 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.REGISTRY }}/${{ secrets.IMAGE_NAME || 'career-flow' }}
+          images: |
+            ${{ secrets.REGISTRY != '' && format('{0}/{1}', secrets.REGISTRY, secrets.IMAGE_NAME || 'career-flow') || format('{0}/{1}', secrets.REGISTRY_USERNAME, secrets.IMAGE_NAME || 'career-flow') }}
           tags: |
             type=sha,format=long,prefix=
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
