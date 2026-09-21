@@ -145,7 +145,7 @@ export function Navbar() {
 
                 {!loading && !hasResults && (
                   <div className="py-4 text-center text-sm text-slate-500">
-                    No results found for <span className="font-semibold text-slate-700">"{query}"</span>
+                    No results found for <span className="font-semibold text-slate-700">&quot;{query}&quot;</span>
                   </div>
                 )}
 
