@@ -86,7 +86,9 @@ export async function executeD1Batch(
       Authorization: `Bearer ${config.apiToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      batch: payload,
+    }),
   });
 
   if (!response.ok) {
