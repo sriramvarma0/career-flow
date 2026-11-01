@@ -228,24 +228,29 @@ export function ApplicationForm({ mode, defaultValues }: ApplicationFormProps) {
 
   const onSubmit = handleSubmit(async (values) => {
     setIsSubmitting(true);
-    const formData = new FormData();
-    if (defaultValues?.id) formData.set("id", defaultValues.id);
-    Object.entries(values).forEach(([key, value]) => formData.set(key, value ?? ""));
+    try {
+      const formData = new FormData();
+      if (defaultValues?.id) formData.set("id", defaultValues.id);
+      Object.entries(values).forEach(([key, value]) => formData.set(key, value ?? ""));
 
-    const result = mode === "create"
-      ? await createApplicationAction(formData)
-      : await updateApplicationAction(formData);
+      const result = mode === "create"
+        ? await createApplicationAction(formData)
+        : await updateApplicationAction(formData);
 
-    setIsSubmitting(false);
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
 
-    if (!result.ok) {
-      toast.error(result.message);
-      return;
+      toast.success(result.message ?? "Saved.");
+      router.push(result.data?.id ? `/applications/${result.data.id}` : "/applications");
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to save application:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save application. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    toast.success(result.message ?? "Saved.");
-    router.push(result.data?.id ? `/applications/${result.data.id}` : "/applications");
-    router.refresh();
   });
 
   return (
@@ -412,20 +417,26 @@ export function ApplicationForm({ mode, defaultValues }: ApplicationFormProps) {
                     return;
                   }
                   setIsSavingStatus(true);
-                  const result = await createCustomStatusAction(trimmed, newStatusCategory);
-                  setIsSavingStatus(false);
-                  if (result.ok && result.data) {
-                    const savedStatus = result.data;
-                    if (!customStatuses.some((cs) => cs.name === savedStatus.name)) {
-                      setCustomStatuses((prev) => [...prev, savedStatus]);
+                  try {
+                    const result = await createCustomStatusAction(trimmed, newStatusCategory);
+                    if (result.ok && result.data) {
+                      const savedStatus = result.data;
+                      if (!customStatuses.some((cs) => cs.name === savedStatus.name)) {
+                        setCustomStatuses((prev) => [...prev, savedStatus]);
+                      }
+                      setValue("status", savedStatus.name, { shouldDirty: true, shouldValidate: true });
+                      setShowNewStatusModal(false);
+                      setNewStatusValue("");
+                      setNewStatusCategory("Applied");
+                      toast.success(result.message || "Custom status added.");
+                    } else {
+                      toast.error(result.message || "Could not save custom status.");
                     }
-                    setValue("status", savedStatus.name, { shouldDirty: true, shouldValidate: true });
-                    setShowNewStatusModal(false);
-                    setNewStatusValue("");
-                    setNewStatusCategory("Applied");
-                    toast.success(result.message || "Custom status added.");
-                  } else {
-                    toast.error(result.message || "Could not save custom status.");
+                  } catch (error) {
+                    console.error("Failed to save custom status:", error);
+                    toast.error(error instanceof Error ? error.message : "Could not save custom status.");
+                  } finally {
+                    setIsSavingStatus(false);
                   }
                 }}
               >

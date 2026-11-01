@@ -47,6 +47,9 @@ next-env.d.ts
 *.db-shm
 *.db-journal
 
+# database SQL data dumps (preserve schema definitions like d1-schema.sql)
+scripts/database/*-export.sql
+
 data/database/*
 !data/database/.gitkeep
 

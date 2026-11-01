@@ -10,6 +10,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:d1": "tsx scripts/database/migrate-sqlite-to-d1.ts",
+    "db:export:d1": "tsx scripts/database/export-sqlite-to-d1-sql.ts",
     "storage:migrate:r2": "tsx scripts/storage/migrate-local-to-r2.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:restore": "node scripts/database/restore-backup.js",
